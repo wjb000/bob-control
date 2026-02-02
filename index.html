@@ -103,13 +103,10 @@
   <script>
   const MOTOR = '/c?d=';
   const SPEED_URL = '/c?d=s';
-  let activeCommand = null;
-  let repeatTimer = null;
+  let interval = null;
   let lightOn = false;
 
-  function send(cmd) {
-    fetch(MOTOR + cmd, {mode: 'no-cors', cache: 'no-store'}).catch(() => {});
-  }
+  function send(cmd) { fetch(MOTOR + cmd, {mode: 'no-cors'}).catch(() => {}); }
 
   function setSpeed(v) {
     v = Math.max(5, Math.min(13, parseInt(v || 13)));
@@ -126,77 +123,70 @@
     send('l');
   }
 
-  // EXACT SAME LOGIC AS PERFECT WASD — reused for buttons
-  function start(cmd) {
-    if (activeCommand === cmd) return;
-    stop();
-    activeCommand = cmd;
-    send(cmd);
-    repeatTimer = setInterval(() => send(cmd), 180);  // same as keyboard
+  // SINGLE SOURCE OF TRUTH — one command per press, continuous only while held
+  function startCommand(cmd) {
+    // If we're already sending this exact command, do nothing (prevents double-fire)
+    if (interval && interval._cmd === cmd) return;
+
+    clearInterval(interval);
+    send(cmd);  // send once immediately
+    interval = setInterval(() => send(cmd), 200);  // 5 commands/sec = smooth + ngrok-safe
+    interval._cmd = cmd;  // mark which command is active
   }
 
-  function stop() {
-    if (repeatTimer) clearInterval(repeatTimer);
-    repeatTimer = null;
-    if (activeCommand) {
-      send('x');
-      activeCommand = null;
-    }
+  function stopCommand() {
+    clearInterval(interval);
+    interval = null;
+    send('x');  // immediate stop
   }
 
-  // KEYBOARD (already perfect — unchanged)
-  const keys = {KeyW:'w', KeyA:'a', KeyS:'s', KeyD:'d', ArrowUp:'w', ArrowLeft:'a', ArrowDown:'s', ArrowRight:'d'};
-  document.addEventListener('keydown', e => {
-    const cmd = keys[e.code];
-    if (cmd && !e.repeat) {
-      e.preventDefault();
-      start(cmd);
-    }
-  });
-  document.addEventListener('keyup', e => {
-    if (keys[e.code]) {
-      e.preventDefault();
-      stop();
-    }
-  });
-
-  // BUTTONS NOW USE EXACT SAME start()/stop() AS KEYBOARD
+  // Apply to ALL buttons (mouse + touch)
   document.querySelectorAll('.btn[data-cmd]').forEach(btn => {
     const cmd = btn.dataset.cmd;
 
-    const handleDown = (e) => {
-      e.preventDefault();
-      start(cmd);
-    };
-
-    const handleUp = () => stop();
+    const press = (e) => { e.preventDefault(); startCommand(cmd); };
+    const release = () => stopCommand();
 
     // Mouse
-    btn.addEventListener('mousedown', handleDown);
-    document.addEventListener('mouseup', handleUp);           // global release
-    btn.addEventListener('mouseleave', handleUp);             // extra safety
+    btn.addEventListener('mousedown', press);
+    btn.addEventListener('mouseup', release);
+    btn.addEventListener('mouseleave', release);
 
     // Touch
-    btn.addEventListener('touchstart', handleDown);
-    document.addEventListener('touchend', handleUp);           // global release
-    document.addEventListener('touchcancel', handleUp);
+    btn.addEventListener('touchstart', press);
+    btn.addEventListener('touchend', release);
+    btn.addEventListener('touchcancel', release);
   });
 
-  // Emergency stop
+  // Keyboard — WASD + Arrows (perfect stop on release)
+  const keyMap = {KeyW:'w', KeyA:'a', KeyS:'s', KeyD:'d', ArrowUp:'w', ArrowLeft:'a', ArrowDown:'s', ArrowRight:'d'};
+  document.addEventListener('keydown', e => {
+    const cmd = keyMap[e.code];
+    if (cmd && !e.repeat) {  // e.repeat = true if key is held (prevents spam on long press)
+      e.preventDefault();
+      startCommand(cmd);
+    }
+  });
+
+  document.addEventListener('keyup', e => {
+    if (keyMap[e.code]) {
+      e.preventDefault();
+      stopCommand();
+    }
+  });
+
+  // Emergency stop (double-tap center button)
   let taps = 0;
   document.getElementById('stop').addEventListener('click', () => {
     taps++;
     if (taps === 2) {
-      stop();
+      stopCommand();
       send('x'); send('x'); send('x');
       alert("EMERGENCY STOP!");
       taps = 0;
     }
     setTimeout(() => taps = 0, 500);
   });
-
-  // Safety net
-  window.addEventListener('blur', stop);
 </script>
 </body>
 </html>
