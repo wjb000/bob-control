@@ -1,0 +1,44 @@
+QUICK PUSH TO GITHUB
+====================
+
+GitHub requires a Personal Access Token (not password).
+
+METHOD 1 - Easiest (GitHub CLI):
+---------------------------------
+Install: brew install gh
+Then run: gh auth login
+Then run: git push -u origin main
+
+
+METHOD 2 - Personal Access Token:
+---------------------------------
+1. Go to: https://github.com/settings/tokens/new
+2. Generate token with "repo" scope
+3. Copy the token
+4. Run: git push -u origin main
+5. Use your token as the password when prompted
+
+
+METHOD 3 - SSH (Recommended):
+---------------------------------
+1. Generate SSH key: ssh-keygen -t ed25519 -C "your@email.com"
+2. Add to GitHub: https://github.com/settings/keys
+3. Change remote: git remote set-url origin git@github.com:wjb000/bob-control.git
+4. Push: git push -u origin main
+
+
+CURRENT STATUS:
+--------------
+✅ All code ready to push (4 commits)
+✅ Server tested and working locally
+✅ Repo exists at: https://github.com/wjb000/bob-control
+⏳ Just needs authentication to push
+
+QUICK TEST WITHOUT PUSHING:
+---------------------------
+cd /Users/sudo/Desktop/bob-control
+source venv/bin/activate
+export BOB_USERNAME=admin BOB_PASSWORD=yourpass
+python server.py
+
+Open: http://localhost:5000
