@@ -1,0 +1,172 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* ssid = "username"; 
+const char* password = "password";
+
+
+IPAddress local_IP(192,168,1,100);
+IPAddress gateway(192,168,1,1);
+IPAddress subnet(255,255,255,0);
+
+const int L_PWM = 21, L_DIR = 22, R_PWM = 23, R_DIR = 25;
+const int LIGHT_PIN = 26;          // ← This will output ~3.3V (HIGH) → use to drive MOSFET/relay for real 5V
+
+int currentSpeed = 13;
+char cmd = '0';
+bool lightState = false;           // track light state so button shows correct text
+unsigned long lastCmd = 0;
+
+WebServer server(80);
+
+// ORIGINAL UI + ONE LIGHT BUTTON ADDED (still looks exactly the same style)
+const char page[] PROGMEM = R"=====(
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hoverboard Control</title>
+<style>
+  :root{--g:#0f8;--r:#f33;--bg:#0a0a0a;--card:#161616}
+  body{margin:0;background:var(--bg);color:var(--g);font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px;box-sizing:border-box}
+  .card{background:var(--card);padding:30px 40px;border-radius:24px;box-shadow:0 20px 60px rgba(0,255,0,0.2);border:1px solid var(--g);max-width:420px;width:100%;text-align:center}
+  h1{font-size:2.3em;margin:0 0 20px;text-shadow:0 0 20px var(--g)}
+  .speedCtrl{display:flex;align-items:center;justify-content:center;gap:12px;margin:25px 0}
+  .speedCtrl button{width:50px;height:50px;font-size:28px;background:#000;border:3px solid var(--g);border-radius:50%;color:var(--g);box-shadow:0 0 20px rgba(0,255,0,0.3)}
+  .speedCtrl button:active{background:var(--g);color:#000}
+  input[type=number]{width:100px;padding:12px;font-size:1.5em;text-align:center;background:#000;border:3px solid var(--g);border-radius:12px;color:var(--g);box-shadow:0 0 20px rgba(0,255,0,0.2)}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin:35px 0}
+  button.ctrl{width:100%;aspect-ratio:1;font-size:3.8em;font-weight:900;border:3px solid var(--g);border-radius:50%;background:#000;color:var(--g);box-shadow:0 0 30px rgba(0,255,0,0.3);transition:all .15s}
+  button.ctrl:active{transform:scale(0.92);background:var(--g);color:#000}
+  #stop{border-color:var(--r);color:var(--r);box-shadow:0 0 30px rgba(255,0,0,0.4)}
+  #stop:active{background:var(--r);color:#fff}
+  .info{font-size:0.95em;margin-top:20px;opacity:0.8}
+  #lightBtn{margin:20px auto;padding:15px 40px;font-size:1.6em;font-weight:bold;border:3px solid var(--g);border-radius:16px;background:#000;color:var(--g);box-shadow:0 0 30px rgba(0,255,0,0.4);cursor:pointer;transition:all .3s}
+  #lightBtn.on{background:var(--g);color:#000;box-shadow:0 0 50px #0f0}
+</style>
+</head><body>
+<div class="card">
+  <h1>HOVERBOARD</h1>
+ 
+  <div class="speedCtrl">
+    <button onclick="adj(-1)">−</button>
+    <input type="number" id="spd" value="13" min="5" max="13" step="1">
+    <button onclick="adj(1)">+</button>
+  </div>
+  <div class="info">Max 13 = 5% power → safe indoors</div>
+
+  <!-- LIGHT BUTTON ADDED HERE -->
+  <button id="lightBtn" onclick="toggleLight()">LIGHT OFF</button>
+
+  <div class="grid">
+    <div></div>
+    <button class="ctrl" onclick="hold('w')">Up Arrow</button>
+    <div></div>
+    <button class="ctrl" onclick="hold('a')">Left Arrow</button>
+    <button class="ctrl" id="stop" onclick="send('x')">STOP</button>
+    <button class="ctrl" onclick="hold('d')">Right Arrow</button>
+    <div></div>
+    <button class="ctrl" onclick="hold('s')">Down Arrow</button>
+    <div></div>
+  </div>
+
+  <div class="info">Hold direction • Release = stop • WASD or arrows</div>
+</div>
+
+<script>
+let iv = null;
+let lightOn = false;
+
+function send(c){fetch('/c+'/c?d='+c)}
+function hold(c){clearInterval(iv);send(c);iv=setInterval(()=>send(c),80)}
+function stop(){clearInterval(iv);send('x')}
+
+function adj(delta){
+  let inp = document.getElementById('spd');
+  let val = parseInt(inp.value) + delta;
+  if(val<5) val=5; if(val>13) val=13;
+  inp.value = val;
+  send('s'+val);
+}
+document.getElementById('spd').addEventListener('change', function(){
+  let v = parseInt(this.value);
+  if(v<5) v=5; if(v>13) v=13;
+  this.value = v;
+  send('s'+v);
+});
+
+function toggleLight(){
+  lightOn = !lightOn;
+  document.getElementById('lightBtn').textContent = lightOn ? 'LIGHT ON' : 'LIGHT OFF';
+  document.getElementById('lightBtn').classList.toggle('on', lightOn);
+  send('l');               // sends ?d=l → toggle on ESP32
+}
+
+document.addEventListener('keydown', e=>{
+  let k = e.key.toLowerCase();
+  if('wasd'.includes(k)){e.preventDefault(); hold(k)}
+  if(k===' ' || k==='x'){e.preventDefault(); send('x')}
+  if(k==='l'){e.preventDefault(); toggleLight()}   // optional: press L key too
+});
+document.addEventListener('keyup', e=>{
+  if('wasdwasd'.includes(e.key.toLowerCase())) stop();
+});
+</script>
+</body></html>
+)=====";
+
+void setup() {
+  pinMode(L_PWM, OUTPUT); pinMode(L_DIR, OUTPUT);
+  pinMode(R_PWM, OUTPUT); pinMode(R_DIR, OUTPUT);
+  pinMode(LIGHT_PIN, OUTPUT);
+  digitalWrite(LIGHT_PIN, LOW);    // start OFF
+
+  stopMotors();
+  Serial.begin(115200);
+
+  WiFi.config(local_IP, gateway, subnet);
+  WiFi.begin(ssid, password);
+  while(WiFi.status()!=WL_CONNECTED) delay(500);
+
+  Serial.print("IP: http://"); Serial.println(WiFi.localIP());
+
+  server.on("/", [](){ server.send_P(200, "text/html", page); });
+  server.on("/c", handleCmd);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+  if(cmd!='0' && millis()-lastCmd>300) stopMotors();
+}
+
+void stopMotors() {
+  analogWrite(L_PWM,0); analogWrite(R_PWM,0); cmd='0';
+}
+
+void drive(int l, int r) {
+  digitalWrite(L_DIR, l<0?HIGH:LOW); analogWrite(L_PWM, abs(l));
+  digitalWrite(R_DIR, r<0?LOW:HIGH); analogWrite(R_PWM, abs(r));
+}
+
+void handleCmd() {
+  if(!server.hasArg("d")) return;
+  String v = server.arg("d");
+  lastCmd = millis();
+
+  if(v=="w") { drive(currentSpeed, currentSpeed); cmd='w'; }
+  else if(v=="s") { drive(-currentSpeed, -currentSpeed); cmd='s'; }
+  else if(v=="a") { drive(-currentSpeed, currentSpeed); cmd='a'; }
+  else if(v=="d") { drive(currentSpeed, -currentSpeed); cmd='d'; }
+  else if(v=="x") { stopMotors(); cmd='0'; }
+  else if(v.startsWith("s")) {
+    int newSpeed = v.substring(1).toInt();
+    if(newSpeed>=5 && newSpeed<=13) currentSpeed = newSpeed;
+  }
+  
+  // LIGHT TOGGLE COMMAND
+  else if(v == "l") {
+    lightState = !lightState;
+    digitalWrite(LIGHT_PIN, lightState ? HIGH : LOW);   // 3.3V HIGH = ON → perfect for MOSFET gate
+  }
+
+  server.send(200, "text/plain", "OK");
+}

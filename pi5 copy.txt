@@ -1,0 +1,412 @@
+cat > bob_master.py << 'EOF'
+#!/usr/bin/env python3
+import os, threading, time, requests, base64, subprocess, tempfile, wave, pyaudio, socket
+from collections import deque
+from flask import Flask, Response, request, jsonify
+from flask_httpauth import HTTPBasicAuth
+from faster_whisper import WhisperModel
+
+os.environ["ALSA_WARN"] = "0"
+os.environ["SDL_AUDIODRIVER"] = "dummy"
+os.environ["NO_AT_BRIDGE"] = "1"
+
+app = Flask(__name__)
+auth = HTTPBasicAuth()
+
+USERNAME = "bob"
+PASSWORD = "bob123"
+MOTOR_ESP = "192.168.1.100"
+CAM_ESP = "192.168.1.222"
+QWEN_URL = "http://192.168.1.134:1234/v1/chat/completions"
+VOICE_MODEL = os.path.expanduser("~/.local/share/piper/en_US-lessac-medium.onnx")
+
+# Use the exact old working Whisper model
+whisper = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+
+# State
+ai_active = False
+throttle = 13
+memory = deque(maxlen=50)
+logs = deque(maxlen=400)
+current_move = None
+ai_move_target = None
+move_lock = threading.Lock()
+
+def log(*args):
+    msg = " ".join(map(str, args))
+    logs.append(msg)
+    print(msg)
+
+def remember(text):
+    if text and text.strip():
+        memory.append(text.strip()[:200])
+
+# SPEAKER — EXACT old working code from your proven version
+speak_queue = []
+speak_lock = threading.Lock()
+def speaker_worker():
+    while True:
+        if speak_queue:
+            with speak_lock:
+                text = speak_queue.pop(0)
+            log(f"BOB SPEAKS → {text}")
+            remember(f"BOB said: {text}")
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    subprocess.run(["piper", "--model", VOICE_MODEL, "--output_file", f.name],
+                                   input=text, text=True, capture_output=True, timeout=15)
+                    subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", "volume=1.0", f.name],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    os.unlink(f.name)
+            except Exception as e:
+                log("Speak error:", e)
+        else:
+            time.sleep(0.1)
+threading.Thread(target=speaker_worker, daemon=True).start()
+
+def speak(text):
+    if not text or not text.strip(): return
+    text = text.strip()
+    if len(text) < 10 and re.match(r'^[bw]*$', text.lower()):
+        text = "Beep boop " + text
+    if len(text) > 200: text = text[:197] + "..."
+    with speak_lock:
+        speak_queue.append(text)
+
+# Send command to ESP32 — old style with action logging
+def send_cmd(c):
+    c = c.lower()
+    if c in "wasdxl":
+        action = {"w":"moved forward","a":"turned left","d":"turned right","s":"moved back","x":"stopped","l":"toggled light"}[c]
+        log(f"→ {action.upper()}")
+        remember(f"BOB action: {action}")
+        try:
+            response = requests.get(f"http://{MOTOR_ESP}/c?d={c}", timeout=2)
+            log(f"Command response: {response.status_code}")
+        except Exception as e:
+            log(f"Command {c} failed: {e}")
+
+# Set throttle on ESP32 (s5 to s13)
+def set_throttle(level):
+    level = max(5, min(13, level))
+    send_cmd(f"s{level}")
+
+# Continuous movement
+def movement_worker():
+    while True:
+        with move_lock:
+            active_cmd = ai_move_target or current_move
+        if active_cmd and active_cmd in "wasd":
+            send_cmd(active_cmd)
+            time.sleep(0.05)
+        else:
+            time.sleep(0.1)
+
+threading.Thread(target=movement_worker, daemon=True).start()
+
+# Camera
+def get_frame():
+    try:
+        r = requests.get(f"http://{CAM_ESP}/stream", stream=True, timeout=7)
+        buf = b""
+        for chunk in r.iter_content(2048):
+            buf += chunk
+            if b"--frame" in buf:
+                a = buf.find(b"\xff\xd8")
+                b = buf.find(b"\xff\xd9", a) + 2
+                if a != -1 and b > a:
+                    return base64.b64encode(buf[a:b]).decode()
+            if len(buf) > 200000: break
+    except: pass
+    return None
+
+# AI Brain
+def brain():
+    time.sleep(3)
+    while True:
+        if not ai_active:
+            with move_lock:
+                global ai_move_target
+                ai_move_target = None
+            time.sleep(1)
+            continue
+
+        img = get_frame()
+        if not img:
+            time.sleep(2)
+            continue
+
+        try:
+            desc = requests.post(QWEN_URL, json={
+                "model": "qwen/qwen3-vl-8b",
+                "messages": [{"role":"system","content":"Describe the image briefly."},
+                             {"role":"user","content":[{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{img}"}}]}]
+            }, timeout=10).json()["choices"][0]["message"]["content"]
+        except: desc = "can't see"
+        log("VISION →", desc)
+        remember(f"Saw: {desc}")
+
+        try:
+            recent = "\n".join(list(memory)[-10:])
+            resp = requests.post(QWEN_URL, json={
+                "model": "qwen/qwen3-vl-8b",
+                "messages": [
+                    {"role":"system","content":"""You are Bob — a friendly safe home robot.
+Use w/a/s/d to move continuously.
+Use x to stop.
+Use l for light.
+Use say: text to speak.
+Be safe and cheerful."""},
+                    {"role":"user","content":[{"type":"text","text":recent},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{img}"}}]}
+                ],
+                "temperature":0.7,"max_tokens":100
+            }, timeout=35).json()
+
+            reply = resp["choices"][0]["message"]["content"].strip()
+            log("AI →", reply)
+
+            with move_lock:
+                ai_move_target = None
+
+            for line in reply.split("\n")[:8]:
+                line = line.strip().lower()
+                if line in "wasd":
+                    with move_lock:
+                        ai_move_target = line
+                elif line == "x":
+                    with move_lock:
+                        ai_move_target = None
+                    send_cmd("x")
+                elif line == "l":
+                    send_cmd("l")
+                elif line.startswith("say:"):
+                    speak(line[4:].strip())
+        except Exception as e:
+            log("AI error:", e)
+        time.sleep(3.5)
+
+threading.Thread(target=brain, daemon=True).start()
+
+# Voice listener — EXACT old working code
+def listener():
+    time.sleep(2)
+    p = pyaudio.PyAudio()
+    mic_index = 0
+    for i in range(p.get_device_count()):
+        if "pnp" in p.get_device_info_by_index(i)['name'].lower():
+            mic_index = i
+            break
+    stream = p.open(format=pyaudio.paInt16, channels=1, rate=48000,
+                    input=True, input_device_index=mic_index, frames_per_buffer=2048)
+    log("\nBOB IS SENTIENT — APARTMENT EXPLORER BOT — VISION-DRIVEN ACTIONS\n")
+    while True:
+        if not ai_active:
+            time.sleep(1)
+            continue
+        audio = b""
+        for _ in range(140):
+            try:
+                audio += stream.read(2048, exception_on_overflow=False)
+            except:
+                pass
+        if len(audio) < 25000: continue
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            w = wave.open(f.name,'wb')
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(48000)
+            w.writeframes(audio); w.close()
+        text = " ".join(s.text for s in whisper.transcribe(f.name, vad_filter=True)[0]).strip()
+        os.unlink(f.name)
+        if text and len(text) > 3:
+            log(f"\nHEARD → {text}")
+            remember(f"Human said: {text}")
+            speak(f"I heard {text}")
+
+threading.Thread(target=listener, daemon=True).start()
+
+# Your latest beautiful UI — right-side controls, full camera background
+HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BOB</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  * { 
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    -khtml-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+    outline: none !important;
+  }
+  body {margin:0;background:#000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;overflow:hidden;height:100vh;position:relative}
+  .cam-bg {position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:0}
+  .overlay {position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;display:flex;flex-direction:column;justify-content:space-between;padding:10px;box-sizing:border-box}
+  .header {text-align:center;padding:5px}
+  h1 {font-size:1.8em;margin:0;font-weight:800}
+  .right-controls {align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;padding:10px}
+  .joy-pad {display:grid;grid-template-columns:repeat(3,40px);grid-template-rows:repeat(3,40px);gap:8px;margin-bottom:10px}
+  .joy-btn {background:rgba(255,255,255,0.15);backdrop-filter:blur(5px);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2em;transition:none}
+  .joy-btn:active {background:rgba(255,255,255,0.3) !important}
+  .stop {background:rgba(255,59,48,0.6) !important;color:#fff !important}
+  .stop:active {background:rgba(255,59,48,0.8) !important}
+  .throttle-row {display:flex;align-items:center;gap:10px;margin:8px 0;flex-direction:row-reverse}
+  .throttle-slider {width:140px;height:30px;-webkit-appearance:slider-horizontal}
+  .throttle-value {font-size:1.1em;font-weight:bold;min-width:30px;text-align:center}
+  .action-row {display:flex;gap:10px;width:auto;margin:8px 0;flex-direction:column;align-items:flex-end}
+  .action-btn {padding:10px 20px;font-size:1.0em;border-radius:15px;border:none;background:rgba(255,255,255,0.15);backdrop-filter:blur(5px);color:#fff;transition:none;width:120px;text-align:center}
+  .action-btn:active {background:rgba(255,255,255,0.3) !important}
+  .light-btn {background:rgba(0,122,255,0.6)}
+  .ai-btn {background:rgba(88,86,214,0.6)}
+  .ai-btn.on {background:rgba(52,199,89,0.8)}
+  .chat-row {display:flex;gap:6px;width:auto;margin:8px 0;align-self:flex-end}
+  .chat-input {padding:10px;font-size:0.9em;border-radius:15px;border:none;background:rgba(255,255,255,0.15);backdrop-filter:blur(5px);color:#fff;width:180px}
+  .chat-send {padding:10px 15px;background:#007aff;border:none;border-radius:15px;color:#fff;font-size:0.9em}
+</style>
+</head>
+<body>
+  <img class="cam-bg" src="/stream" alt="Camera Background">
+  <div class="overlay">
+    <div class="header">
+      <h1>BOB</h1>
+    </div>
+    <div class="right-controls">
+      <div class="joy-pad">
+        <div></div>
+        <div class="joy-btn hold" onmousedown="start('w')" onmouseup="stop()" ontouchstart="start('w')" ontouchend="stop()">↑</div>
+        <div></div>
+        <div class="joy-btn hold" onmousedown="start('a')" onmouseup="stop()" ontouchstart="start('a')" ontouchend="stop()">←</div>
+        <div class="joy-btn stop" onclick="cmd('x')">STOP</div>
+        <div class="joy-btn hold" onmousedown="start('d')" onmouseup="stop()" ontouchstart="start('d')" ontouchend="stop()">→</div>
+        <div></div>
+        <div class="joy-btn hold" onmousedown="start('s')" onmouseup="stop()" ontouchstart="start('s')" ontouchend="stop()">↓</div>
+        <div></div>
+      </div>
+      <div class="throttle-row">
+        <input type="range" class="throttle-slider" min="5" max="13" value="13" oninput="fetch('/speed?s='+this.value)">
+        <span class="throttle-value" id="throttle-val">13</span>
+      </div>
+      <div class="action-row">
+        <button class="action-btn light-btn" onclick="cmd('l')">LIGHT</button>
+        <button id="ai" class="action-btn ai-btn" onclick="toggle()">AI OFF</button>
+      </div>
+      <div class="chat-row">
+        <button class="chat-send" onclick="say()">SEND</button>
+        <input class="chat-input" id="txt" placeholder="Talk to Bob...">
+      </div>
+    </div>
+  </div>
+
+<script>
+function start(dir){fetch('/move?dir='+dir)}
+function stop(){fetch('/move?dir=stop')}
+function cmd(c){fetch('/cmd?c='+c)}
+function say(){let t=document.getElementById('txt');if(t.value.trim())fetch('/say',{method:'POST',body:'t='+encodeURIComponent(t.value)});t.value=''}
+function toggle(){
+  fetch('/toggle').then(r=>r.json()).then(on=>{
+    let b=document.getElementById('ai');
+    b.innerText=on?'AI ACTIVE':'AI OFF';
+    b.classList.toggle('on',on);
+  })
+}
+document.querySelector('.throttle-slider').addEventListener('input', function(){document.getElementById('throttle-val').innerText=this.value})
+document.addEventListener('keydown', e => {
+  let k = e.key.toLowerCase();
+  if ('wasd'.includes(k)) { e.preventDefault(); start(k); }
+  if (k === 'x' || k === ' ') { e.preventDefault(); cmd('x'); }
+});
+document.addEventListener('keyup', e => {
+  if ('wasd'.includes(e.key.toLowerCase())) stop();
+});
+fetch('/toggle').then(r=>r.json()).then(on=>{let b=document.getElementById('ai');b.innerText=on?'AI ACTIVE':'AI OFF';b.classList.toggle('on',on)})
+</script>
+</body>
+</html>"""
+
+@app.route("/")
+@auth.login_required
+def index(): return HTML
+
+@app.route("/stream")
+@auth.login_required
+def stream():
+    def gen():
+        with requests.get(f"http://{CAM_ESP}/stream", stream=True, timeout=10) as r:
+            for chunk in r.iter_content(1024): yield chunk
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+@app.route("/move")
+@auth.login_required
+def manual_move():
+    dir = request.args.get("dir", "stop")
+    with move_lock:
+        global current_move
+        if dir == "stop":
+            current_move = None
+            send_cmd("x")
+        elif dir in "wasd":
+            current_move = dir
+    return "OK"
+
+@app.route("/cmd")
+@auth.login_required
+def single_cmd():
+    c = request.args.get("c", "")
+    if c == "x":
+        with move_lock:
+            global current_move, ai_move_target
+            current_move = None
+            ai_move_target = None
+        send_cmd("x")
+    elif c == "l":
+        send_cmd("l")
+    return "OK"
+
+@app.route("/toggle")
+@auth.login_required
+def toggle():
+    global ai_active
+    ai_active = not ai_active
+    if ai_active:
+        speak("Hello friend! I'm awake and ready!")
+    return jsonify(ai_active)
+
+@app.route("/speed")
+@auth.login_required
+def setspeed():
+    global throttle
+    try:
+        s = int(request.args.get("s", 13))
+        throttle = max(5, min(13, s))
+        set_throttle(throttle)
+        log(f"Throttle set to {throttle}")
+    except:
+        pass
+    return "OK"
+
+@app.route("/say", methods=["POST"])
+@auth.login_required
+def say():
+    text = request.form.get("t", "").strip()
+    if text:
+        remember(f"Human typed: {text}")
+        speak(text)
+    return "OK"
+
+@auth.verify_password
+def verify(u,p): return u==USERNAME and p==PASSWORD
+
+if __name__ == "__main__":
+    log("Bob starting up...")
+    speak("System ready")
+    set_throttle(13)
+    log("Bob ready → http://" + socket.gethostbyname(socket.gethostname()) + ":5000")
+    app.run(host="0.0.0.0", port=5000, threaded=True)
+EOF
+
+# Restart
+pkill -f bob_master.py
+sleep 2
+python3 bob_master.py
