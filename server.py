@@ -6,9 +6,13 @@ app = Flask(__name__, static_folder='.')
 
 auth = HTTPBasicAuth()
 
-# CHANGE THESE TO SOMETHING STRONG!
+# Authentication - Set via environment variables or change below
+import os
+USERNAME = os.getenv('BOB_USERNAME', 'admin')
+PASSWORD = os.getenv('BOB_PASSWORD', 'changeme')
+
 users = {
-    "robot": "MySuperSecretPass123"   # ← Make sure you change this!
+    USERNAME: PASSWORD
 }
 
 @auth.verify_password
