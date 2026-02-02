@@ -3,166 +3,743 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ROBOT FPV</title>
+  <title>TACTICAL OPS - BOB UNIT</title>
   <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    html,body{height:100%;overflow:hidden;background:#000;font-family:'Courier New',monospace;color:#0f0;}
-    #cam-container{
-      position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-      width:92vw;height:88vh;padding:16px;background:#000;
-      border:8px solid #0f0;border-radius:20px;
-      box-shadow:0 0 40px #0f0, inset 0 0 40px #0f0;z-index:1;
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700;900&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
-    #cam{width:100%;height:100%;object-fit:contain;background:#000;image-rendering:pixelated;display:block;}
-    .ui{position:fixed;top:0;left:0;width:100%;height:100%;z-index:10;pointer-events:none;padding:10px;}
-    .ui > *{pointer-events:auto;}
-    .top{
-      display:flex;flex-direction:column;align-items:center;gap:8px;
-      background:rgba(0,0,0,0.75);border-radius:14px;
-      padding:10px 20px;margin:8px auto 0;width:fit-content;
-      border:2px solid rgba(0,255,0,0.5);
+
+    :root {
+      --primary: #00ff41;
+      --secondary: #ff6b00;
+      --danger: #ff0040;
+      --warning: #ffd700;
+      --bg: #0a0e14;
+      --bg-light: #141a24;
+      --bg-card: #1a2332;
+      --border: #2a3f5f;
+      --text: #e0e6ed;
+      --text-dim: #7d8694;
     }
-    .title{font-size:20px;letter-spacing:6px;text-shadow:0 0 18px #0f0;}
-    .speed{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:15px;}
-    .speed label{letter-spacing:3px;}
-    .speed-controls{display:flex;gap:12px;align-items:center;}
-    input[type=number]{
-      width:52px;padding:5px;font-size:17px;background:#000;border:2px solid #0f0;
-      color:#0f0;border-radius:8px;text-align:center;
+
+    body {
+      font-family: 'Rajdhani', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      height: 100vh;
+      position: relative;
     }
-    input[type=range]{
-      width:140px;height:9px;background:#111;border-radius:5px;-webkit-appearance:none;
+
+    /* Scanline effect */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 255, 65, 0.03) 0px,
+        transparent 1px,
+        transparent 2px,
+        rgba(0, 255, 65, 0.03) 3px
+      );
+      pointer-events: none;
+      z-index: 9999;
+      animation: scanline 8s linear infinite;
     }
-    input[type=range]::-webkit-slider-thumb{
-      background:#0f0;width:26px;height:26px;border-radius:50%;box-shadow:0 0 20px #0f0;
+
+    @keyframes scanline {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(10px); }
     }
-    #lightBtn{
-      margin-top:6px;padding:8px 26px;font-size:18px;
-      border:4px solid #0f0;background:rgba(0,0,0,0.8);border-radius:14px;
-      box-shadow:0 0 20px rgba(0,255,0,0.6);cursor:pointer;transition:all .3s;
+
+    .grid-container {
+      display: grid;
+      grid-template-columns: 320px 1fr 280px;
+      grid-template-rows: 60px 1fr;
+      gap: 12px;
+      height: 100vh;
+      padding: 12px;
     }
-    #lightBtn.on{background:#0f0;color:#000;box-shadow:0 0 50px #0f0;}
-    .wasd{
-      position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
-      display:grid;
-      grid-template-columns:repeat(3,62px);
-      grid-template-rows:repeat(3,62px);
-      gap:11px;background:rgba(0,0,0,0.85);
-      padding:12px 16px;border-radius:18px;
-      border:3px solid rgba(0,255,0,0.5);
+
+    /* Top Bar */
+    .top-bar {
+      grid-column: 1 / -1;
+      background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-light) 100%);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      box-shadow: 0 4px 20px rgba(0, 255, 65, 0.1);
     }
-    .btn{
-      background:rgba(0,0,0,0.9);border:4px solid #0f0;border-radius:50%;
-      color:#0f0;font-size:38px;
-      display:flex;align-items:center;justify-content:center;
-      cursor:pointer;user-select:none;transition:all .1s;
-      box-shadow:0 0 15px rgba(0,255,0,0.6);
+
+    .logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 3px;
+      color: var(--primary);
+      text-shadow: 0 0 20px var(--primary), 0 0 40px var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
-    .btn:active{background:#0f0;color:#000;transform:scale(0.88);box-shadow:0 0 50px #0f0;}
-    #stop{background:rgba(100,0,0,0.95);border-color:#f00;color:#f00;}
-    #stop:active{background:#f00;color:#fff;}
-    .status{
-      position:fixed;top:10px;right:10px;padding:6px 14px;
-      background:rgba(0,255,0,0.2);border:2px solid #0f0;
-      border-radius:10px;font-size:14px;backdrop-filter:blur(5px);
+
+    .logo::before {
+      content: '◢';
+      font-size: 32px;
     }
-    @media (max-width:768px){
-      .wasd{grid-template-columns:repeat(3,56px);grid-template-rows:repeat(3,56px);gap:9px;padding:10px;}
-      .btn{font-size:34px;}
+
+    .mission-status {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .status-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .status-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .status-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--primary);
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    .live-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(0, 255, 65, 0.1);
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+    }
+
+    .live-dot {
+      width: 10px;
+      height: 10px;
+      background: var(--primary);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+      box-shadow: 0 0 10px var(--primary);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* Left Panel - Controls */
+    .left-panel {
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    .panel-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--primary);
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-title::before {
+      content: '▸';
+      color: var(--secondary);
+    }
+
+    /* Speed Control */
+    .speed-control {
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    .speed-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    .speed-display {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 48px;
+      font-weight: 900;
+      color: var(--primary);
+      text-align: center;
+      text-shadow: 0 0 20px var(--primary);
+      margin-bottom: 12px;
+    }
+
+    .speed-bar {
+      width: 100%;
+      height: 12px;
+      background: var(--bg);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+    }
+
+    .speed-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+      transition: width 0.3s;
+      box-shadow: 0 0 10px var(--primary);
+    }
+
+    .speed-slider {
+      width: 100%;
+      height: 40px;
+      -webkit-appearance: none;
+      background: var(--bg);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      outline: none;
+    }
+
+    .speed-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 32px;
+      height: 32px;
+      background: var(--primary);
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 0 20px var(--primary), 0 0 40px var(--primary);
+      border: 3px solid var(--bg);
+    }
+
+    /* Light Control */
+    .light-control {
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    .light-btn {
+      width: 100%;
+      padding: 20px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      background: var(--bg);
+      color: var(--text-dim);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .light-btn::before {
+      content: '◉';
+      position: absolute;
+      left: 20px;
+      font-size: 24px;
+      transition: all 0.3s;
+    }
+
+    .light-btn.active {
+      background: var(--warning);
+      color: var(--bg);
+      border-color: var(--warning);
+      box-shadow: 0 0 30px var(--warning), inset 0 0 30px rgba(255, 215, 0, 0.3);
+    }
+
+    .light-btn.active::before {
+      color: var(--bg);
+      animation: glow 1s infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+    }
+
+    /* System Status */
+    .system-status {
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .sys-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px;
+      background: var(--bg);
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    .sys-label {
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .sys-value {
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    /* Center - Camera Feed */
+    .camera-feed {
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #cam {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      filter: contrast(1.1) brightness(0.95);
+    }
+
+    .camera-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      border: 3px solid var(--primary);
+      box-shadow: inset 0 0 60px rgba(0, 255, 65, 0.2);
+    }
+
+    .crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 40px;
+      border: 2px solid var(--primary);
+      border-radius: 50%;
+      box-shadow: 0 0 20px var(--primary);
+    }
+
+    .crosshair::before,
+    .crosshair::after {
+      content: '';
+      position: absolute;
+      background: var(--primary);
+      box-shadow: 0 0 10px var(--primary);
+    }
+
+    .crosshair::before {
+      width: 20px;
+      height: 2px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .crosshair::after {
+      width: 2px;
+      height: 20px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .cam-info {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(10, 14, 20, 0.9);
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 12px;
+      color: var(--primary);
+      backdrop-filter: blur(10px);
+    }
+
+    /* Right Panel - Movement Controls */
+    .right-panel {
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: auto;
+    }
+
+    .ctrl-btn {
+      aspect-ratio: 1;
+      background: var(--bg-light);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      color: var(--primary);
+      font-size: 32px;
+      font-weight: 900;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      text-shadow: 0 0 10px var(--primary);
+    }
+
+    .ctrl-btn::before {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .ctrl-btn:active {
+      transform: scale(0.9);
+      border-color: var(--primary);
+      background: var(--primary);
+      color: var(--bg);
+      box-shadow: 0 0 30px var(--primary), inset 0 0 20px rgba(0, 255, 65, 0.5);
+    }
+
+    .ctrl-btn:active::before {
+      opacity: 0.3;
+    }
+
+    .stop-btn {
+      background: var(--bg);
+      border-color: var(--danger);
+      color: var(--danger);
+      font-size: 24px;
+      text-shadow: 0 0 10px var(--danger);
+    }
+
+    .stop-btn:active {
+      background: var(--danger);
+      color: white;
+      box-shadow: 0 0 40px var(--danger);
+    }
+
+    .telemetry {
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .tele-item {
+      text-align: center;
+    }
+
+    .tele-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+
+    .tele-value {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      .grid-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: 60px auto auto auto;
+      }
+
+      .control-grid {
+        grid-template-columns: repeat(3, 80px);
+        justify-content: center;
+      }
     }
   </style>
 </head>
 <body>
-  <div id="cam-container"><img id="cam" src="/stream" alt="FPV"></div>
-  <div class="ui">
-    <div class="top">
-      <div class="title">ROBOT FPV</div>
-      <div class="speed">
-        <label>SPEED</label>
-        <div class="speed-controls">
-          <input type="number" id="speedVal" value="13" min="5" max="13" onchange="setSpeed(this.value)">
-          <input type="range" min="5" max="13" value="13" step="1" oninput="setSpeed(this.value)">
+  <div class="grid-container">
+    <!-- Top Bar -->
+    <div class="top-bar">
+      <div class="logo">
+        BOB TACTICAL UNIT
+      </div>
+      <div class="mission-status">
+        <div class="status-item">
+          <div class="status-label">Mission Time</div>
+          <div class="status-value" id="missionTime">00:00:00</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">Commands</div>
+          <div class="status-value" id="cmdCount">0</div>
+        </div>
+        <div class="live-indicator">
+          <div class="live-dot"></div>
+          <span style="font-weight: 600; letter-spacing: 2px;">LIVE</span>
         </div>
       </div>
-      <div id="lightBtn" onclick="toggleLight()">LIGHT OFF</div>
     </div>
-    <div class="wasd">
-      <div></div>
-      <button class="btn" data-cmd="w">↑</button>
-      <div></div>
-      <button class="btn" data-cmd="a">←</button>
-      <button class="btn" id="stop"></button>
-      <button class="btn" data-cmd="d">→</button>
-      <div></div>
-      <button class="btn" data-cmd="s">↓</button>
-      <div></div>
+
+    <!-- Left Panel -->
+    <div class="left-panel">
+      <div class="panel-title">POWER CONTROL</div>
+
+      <div class="speed-control">
+        <div class="speed-label">Motor Output Level</div>
+        <div class="speed-display" id="speedDisplay">13</div>
+        <div class="speed-bar">
+          <div class="speed-fill" id="speedFill" style="width: 100%"></div>
+        </div>
+        <input type="range" class="speed-slider" id="speedSlider" min="5" max="13" value="13" step="1">
+      </div>
+
+      <div class="panel-title">ILLUMINATION</div>
+
+      <div class="light-control">
+        <button class="light-btn" id="lightBtn" onclick="toggleLight()">
+          ◉ LIGHT OFFLINE
+        </button>
+      </div>
+
+      <div class="panel-title">SYSTEM STATUS</div>
+
+      <div class="system-status">
+        <div class="sys-item">
+          <span class="sys-label">Camera Feed</span>
+          <span class="sys-value">ACTIVE</span>
+        </div>
+        <div class="sys-item">
+          <span class="sys-label">Motors</span>
+          <span class="sys-value" id="motorStatus">STANDBY</span>
+        </div>
+        <div class="sys-item">
+          <span class="sys-label">Connection</span>
+          <span class="sys-value">SECURED</span>
+        </div>
+        <div class="sys-item">
+          <span class="sys-label">Protocol</span>
+          <span class="sys-value">HTTP/1.1</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center - Camera -->
+    <div class="camera-feed">
+      <img id="cam" src="/stream" alt="TACTICAL FEED">
+      <div class="camera-overlay">
+        <div class="crosshair"></div>
+      </div>
+      <div class="cam-info">
+        <div>◢ FPV CAMERA</div>
+        <div style="font-size: 10px; color: var(--text-dim); margin-top: 4px;">192.168.1.222</div>
+      </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
+      <div class="panel-title">MOVEMENT CONTROL</div>
+
+      <div class="telemetry">
+        <div class="tele-item">
+          <div class="tele-label">Direction</div>
+          <div class="tele-value" id="direction">---</div>
+        </div>
+        <div class="tele-item">
+          <div class="tele-label">Speed</div>
+          <div class="tele-value" id="speedTele">0%</div>
+        </div>
+        <div class="tele-item">
+          <div class="tele-label">Response</div>
+          <div class="tele-value" id="latency">0ms</div>
+        </div>
+        <div class="tele-item">
+          <div class="tele-label">Status</div>
+          <div class="tele-value" id="moveStatus">IDLE</div>
+        </div>
+      </div>
+
+      <div class="control-grid">
+        <div></div>
+        <button class="ctrl-btn" data-cmd="w">▲</button>
+        <div></div>
+        <button class="ctrl-btn" data-cmd="a">◄</button>
+        <button class="ctrl-btn stop-btn" id="stopBtn">■</button>
+        <button class="ctrl-btn" data-cmd="d">►</button>
+        <div></div>
+        <button class="ctrl-btn" data-cmd="s">▼</button>
+        <div></div>
+      </div>
+
+      <div style="font-size: 11px; color: var(--text-dim); text-align: center; margin-top: auto;">
+        USE WASD OR ARROW KEYS • HOLD FOR MOVEMENT • RELEASE TO STOP
+      </div>
     </div>
   </div>
-  <div class="status" id="status">LIVE</div>
 
   <script>
   const MOTOR = '/c?d=';
-  const SPEED_URL = '/c?d=s';
   let interval = null;
   let lightOn = false;
+  let cmdCount = 0;
+  let startTime = Date.now();
+  let currentCmd = null;
 
-  function send(cmd) { fetch(MOTOR + cmd, {mode: 'no-cors'}).catch(() => {}); }
+  // Mission timer
+  setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const h = Math.floor(elapsed / 3600).toString().padStart(2, '0');
+    const m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
+    const s = (elapsed % 60).toString().padStart(2, '0');
+    document.getElementById('missionTime').textContent = `${h}:${m}:${s}`;
+  }, 1000);
+
+  function send(cmd) {
+    const start = Date.now();
+    fetch(MOTOR + cmd, {mode: 'no-cors'})
+      .then(() => {
+        const latency = Date.now() - start;
+        document.getElementById('latency').textContent = latency + 'ms';
+        cmdCount++;
+        document.getElementById('cmdCount').textContent = cmdCount;
+      })
+      .catch(() => {});
+  }
 
   function setSpeed(v) {
     v = Math.max(5, Math.min(13, parseInt(v || 13)));
-    document.getElementById('speedVal').value = v;
-    document.querySelector('input[type=range]').value = v;
-    fetch(SPEED_URL + v, {mode: 'no-cors'});
+    document.getElementById('speedDisplay').textContent = v;
+    document.getElementById('speedSlider').value = v;
+    const percent = ((v - 5) / (13 - 5)) * 100;
+    document.getElementById('speedFill').style.width = percent + '%';
+    document.getElementById('speedTele').textContent = Math.round(percent) + '%';
+    send('s' + v);
   }
+
+  document.getElementById('speedSlider').addEventListener('input', function() {
+    setSpeed(this.value);
+  });
 
   function toggleLight() {
     lightOn = !lightOn;
-    const b = document.getElementById('lightBtn');
-    b.textContent = lightOn ? 'LIGHT ON' : 'LIGHT OFF';
-    b.classList.toggle('on', lightOn);
+    const btn = document.getElementById('lightBtn');
+    btn.textContent = lightOn ? '◉ LIGHT ONLINE' : '◉ LIGHT OFFLINE';
+    btn.classList.toggle('active', lightOn);
     send('l');
   }
 
-  // SINGLE SOURCE OF TRUTH — one command per press, continuous only while held
-  function startCommand(cmd) {
-    // If we're already sending this exact command, do nothing (prevents double-fire)
-    if (interval && interval._cmd === cmd) return;
+  const directionMap = {
+    w: 'FWD', s: 'REV', a: 'LEFT', d: 'RIGHT', x: 'STOP'
+  };
 
+  function startCommand(cmd) {
+    if (interval && interval._cmd === cmd) return;
     clearInterval(interval);
-    send(cmd);  // send once immediately
-    interval = setInterval(() => send(cmd), 200);  // 5 commands/sec = smooth + ngrok-safe
-    interval._cmd = cmd;  // mark which command is active
+    send(cmd);
+    interval = setInterval(() => send(cmd), 200);
+    interval._cmd = cmd;
+    currentCmd = cmd;
+    document.getElementById('direction').textContent = directionMap[cmd] || '---';
+    document.getElementById('moveStatus').textContent = 'ACTIVE';
+    document.getElementById('motorStatus').textContent = 'ENGAGED';
   }
 
   function stopCommand() {
     clearInterval(interval);
     interval = null;
-    send('x');  // immediate stop
+    send('x');
+    currentCmd = null;
+    document.getElementById('direction').textContent = '---';
+    document.getElementById('moveStatus').textContent = 'IDLE';
+    document.getElementById('motorStatus').textContent = 'STANDBY';
   }
 
-  // Apply to ALL buttons (mouse + touch)
-  document.querySelectorAll('.btn[data-cmd]').forEach(btn => {
+  // Button controls
+  document.querySelectorAll('.ctrl-btn[data-cmd]').forEach(btn => {
     const cmd = btn.dataset.cmd;
-
     const press = (e) => { e.preventDefault(); startCommand(cmd); };
     const release = () => stopCommand();
 
-    // Mouse
     btn.addEventListener('mousedown', press);
     btn.addEventListener('mouseup', release);
     btn.addEventListener('mouseleave', release);
-
-    // Touch
     btn.addEventListener('touchstart', press);
     btn.addEventListener('touchend', release);
     btn.addEventListener('touchcancel', release);
   });
 
-  // Keyboard — WASD + Arrows (perfect stop on release)
-  const keyMap = {KeyW:'w', KeyA:'a', KeyS:'s', KeyD:'d', ArrowUp:'w', ArrowLeft:'a', ArrowDown:'s', ArrowRight:'d'};
+  // Keyboard
+  const keyMap = {
+    KeyW:'w', KeyA:'a', KeyS:'s', KeyD:'d',
+    ArrowUp:'w', ArrowLeft:'a', ArrowDown:'s', ArrowRight:'d'
+  };
+
   document.addEventListener('keydown', e => {
     const cmd = keyMap[e.code];
-    if (cmd && !e.repeat) {  // e.repeat = true if key is held (prevents spam on long press)
+    if (cmd && !e.repeat) {
       e.preventDefault();
       startCommand(cmd);
     }
@@ -175,18 +752,20 @@
     }
   });
 
-  // Emergency stop (double-tap center button)
+  // Emergency stop
   let taps = 0;
-  document.getElementById('stop').addEventListener('click', () => {
+  document.getElementById('stopBtn').addEventListener('click', () => {
     taps++;
     if (taps === 2) {
       stopCommand();
       send('x'); send('x'); send('x');
-      alert("EMERGENCY STOP!");
       taps = 0;
     }
     setTimeout(() => taps = 0, 500);
   });
+
+  // Initialize
+  setSpeed(13);
 </script>
 </body>
 </html>
