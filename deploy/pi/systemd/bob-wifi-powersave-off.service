@@ -1,0 +1,14 @@
+# bob-net (2026-11-03): belt-and-braces, force Wi-Fi power save off once wlan0 is up.
+[Unit]
+Description=Bob: Wi-Fi power save off on wlan0
+After=NetworkManager.service sys-subsystem-net-devices-wlan0.device
+Wants=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/nm-online -s -q -t 30
+ExecStart=/usr/sbin/iw dev wlan0 set power_save off
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

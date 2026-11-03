@@ -1,0 +1,9 @@
+[Unit]
+Description=Bob: health check (curl each local port, restart hung/failed services)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bob-healthcheck.sh
+Nice=5
+TimeoutStartSec=120

@@ -1,0 +1,10 @@
+[Unit]
+Description=Bob: run bob-healthcheck every 30 s
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
